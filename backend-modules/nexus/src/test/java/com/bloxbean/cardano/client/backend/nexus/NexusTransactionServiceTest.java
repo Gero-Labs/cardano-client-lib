@@ -81,6 +81,8 @@ class NexusTransactionServiceTest {
                 .txSize(300)
                 .invalidBefore("10")
                 .invalidAfter("2000")
+                .inputs(List.of(
+                        TxIO.builder().txHash("in-txh").txIndex(0).build()))
                 .outputs(List.of(
                         TxIO.builder().txHash("txh1").txIndex(0).build(),
                         TxIO.builder().txHash("txh1").txIndex(1).build()))
@@ -107,7 +109,7 @@ class NexusTransactionServiceTest {
         assertThat(tc.getInvalidHereafter()).isEqualTo("2000");
         assertThat(tc.getIndex()).isNull();
         assertThat(tc.getValidContract()).isNull();
-        assertThat(tc.getUtxoCount()).isEqualTo(2);
+        assertThat(tc.getUtxoCount()).isEqualTo(3);
         assertThat(tc.getWithdrawalCount()).isEqualTo(1);
         assertThat(tc.getAssetMintOrBurnCount()).isEqualTo(0);
     }
