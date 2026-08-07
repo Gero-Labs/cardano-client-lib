@@ -95,6 +95,52 @@ class NexusAssetServiceTest {
     }
 
     @Test
+    void getAsset_policyIdOnlyUnit_boundaryGuard_verifiesEmptyAssetNameAndReturnsMappedAsset() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        AssetDetailedInformation info = AssetDetailedInformation.builder()
+                .policyId(POLICY_ID)
+                .assetName("")
+                .fingerprint("asset1noname")
+                .quantity("42")
+                .build();
+        when(sdkAssetSvc.getAssetDetailedInformation(eq(NET), eq(POLICY_ID), eq("")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, info));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        // A unit that is exactly 56 hex chars (policyId only, no asset name suffix) exercises
+        // the substring boundary guard rather than throwing StringIndexOutOfBoundsException.
+        Result<Asset> r = svc.getAsset(POLICY_ID);
+
+        verify(sdkAssetSvc, times(1)).getAssetDetailedInformation(NET, POLICY_ID, "");
+        assertThat(r.isSuccessful()).isTrue();
+        Asset asset = r.getValue();
+        assertThat(asset.getAsset()).isEqualTo(POLICY_ID);
+        assertThat(asset.getPolicyId()).isEqualTo(POLICY_ID);
+        assertThat(asset.getAssetName()).isEqualTo("");
+        assertThat(asset.getFingerprint()).isEqualTo("asset1noname");
+        assertThat(asset.getQuantity()).isEqualTo("42");
+    }
+
+    @Test
+    void getAsset_malformedOnchainMetadata_leftNull_noExceptionPropagates() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        AssetDetailedInformation info = AssetDetailedInformation.builder()
+                .policyId(POLICY_ID)
+                .assetName(ASSET_NAME)
+                .quantity("1")
+                .onchainMetadata("{not valid json")
+                .build();
+        when(sdkAssetSvc.getAssetDetailedInformation(eq(NET), eq(POLICY_ID), eq(ASSET_NAME)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, info));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        Result<Asset> r = svc.getAsset(UNIT);
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue().getOnchainMetadata()).isNull();
+    }
+
+    @Test
     void getAsset_error_propagates() throws Exception {
         var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
         when(sdkAssetSvc.getAssetDetailedInformation(any(), any(), any()))
