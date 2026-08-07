@@ -13,6 +13,8 @@ public final class NexusResultMapper {
         if (!res.isSuccessful()) {
             return Result.error(res.getResponse()).code(res.getCode());
         }
-        return Result.success("OK").withValue(conv.apply(res.getValue())).code(200);
+        // Guard a null 2xx body: apply conv only when a value is present, else surface success with a null value.
+        B value = res.getValue() == null ? null : conv.apply(res.getValue());
+        return Result.success("OK").withValue(value).code(200);
     }
 }

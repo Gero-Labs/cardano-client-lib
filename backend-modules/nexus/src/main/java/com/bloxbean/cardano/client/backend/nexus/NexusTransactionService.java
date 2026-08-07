@@ -93,6 +93,7 @@ public class NexusTransactionService implements TransactionService {
         tc.setUtxoCount(tx.getInputs() == null && tx.getOutputs() == null ? null :
                 (tx.getInputs() == null ? 0 : tx.getInputs().size()) + (tx.getOutputs() == null ? 0 : tx.getOutputs().size()));
         tc.setWithdrawalCount(tx.getWithdrawals() == null ? null : tx.getWithdrawals().size());
+        // Line-item count (number of mint/burn actions, Blockfrost-style) — deliberately not koios's abs-quantity sum.
         tc.setAssetMintOrBurnCount(tx.getAssetsMinted() == null ? null : tx.getAssetsMinted().size());
         return tc;
     }

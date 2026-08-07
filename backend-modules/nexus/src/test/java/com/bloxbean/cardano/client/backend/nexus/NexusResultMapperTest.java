@@ -24,4 +24,13 @@ class NexusResultMapperTest {
         assertThat(r.isSuccessful()).isFalse();
         assertThat(r.code()).isEqualTo(503);
     }
+
+    @Test
+    void map_successWithNullValue_returnsSuccessfulResultWithNullValue() {
+        adlabs.nexus.client.backend.api.base.Result<String> sdk =
+                adlabs.nexus.client.backend.api.base.Result.success(200, null);
+        Result<Integer> r = NexusResultMapper.map(sdk, String::length);
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).isNull();
+    }
 }
