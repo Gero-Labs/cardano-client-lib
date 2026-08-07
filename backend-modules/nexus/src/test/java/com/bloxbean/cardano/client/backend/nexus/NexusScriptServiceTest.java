@@ -91,6 +91,19 @@ class NexusScriptServiceTest {
     }
 
     @Test
+    void getScriptDatumCbor_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.script.ScriptService.class);
+        when(sdkSvc.getDatumByHash(any(), any()))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
+        var svc = new NexusScriptService(sdkSvc, NET);
+
+        assertThatThrownBy(() -> svc.getScriptDatumCbor("dh1"))
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
+    }
+
+    @Test
     void getNativeScriptJson_maps() throws Exception {
         var sdkSvc = mock(adlabs.nexus.client.backend.api.script.ScriptService.class);
         JsonNode json = objectMapper.readTree("{\"type\":\"sig\",\"keyHash\":\"abc\"}");
@@ -116,6 +129,19 @@ class NexusScriptServiceTest {
 
         assertThat(r.isSuccessful()).isFalse();
         assertThat(r.code()).isEqualTo(404);
+    }
+
+    @Test
+    void getNativeScriptJson_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.script.ScriptService.class);
+        when(sdkSvc.getScriptByHash(any(), any()))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
+        var svc = new NexusScriptService(sdkSvc, NET);
+
+        assertThatThrownBy(() -> svc.getNativeScriptJson("sh1"))
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
     }
 
     @Test
