@@ -95,6 +95,21 @@ class NexusUtxoServiceTest {
     }
 
     @Test
+    void getUtxos_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        var txSvc = new NexusTransactionService(
+                mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class), NET);
+        when(sdkAddressSvc.getAddressUtxos(any(), any(), any(Integer.class), any(Integer.class)))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
+        var svc = new NexusUtxoService(sdkAddressSvc, txSvc, NET);
+
+        assertThatThrownBy(() -> svc.getUtxos("addr1", 10, 1))
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
+    }
+
+    @Test
     void getUtxos_withOrder_ignoresOrderAndStillReturnsMapped() throws Exception {
         var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
         var txSvc = new NexusTransactionService(
@@ -153,6 +168,21 @@ class NexusUtxoServiceTest {
 
         assertThat(r.isSuccessful()).isTrue();
         assertThat(r.getValue()).hasSize(1);
+    }
+
+    @Test
+    void getUtxosByAsset_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        var txSvc = new NexusTransactionService(
+                mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class), NET);
+        when(sdkAddressSvc.getAddressUtxosByAsset(any(), any(), any(), any(Integer.class), any(Integer.class)))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
+        var svc = new NexusUtxoService(sdkAddressSvc, txSvc, NET);
+
+        assertThatThrownBy(() -> svc.getUtxos("addr1", "unit1", 20, 1))
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
     }
 
     @Test
