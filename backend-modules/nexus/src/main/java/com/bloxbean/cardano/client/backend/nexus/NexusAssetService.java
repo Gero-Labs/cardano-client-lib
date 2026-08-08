@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.client.backend.nexus;
 
+import adlabs.nexus.client.backend.api.asset.model.PaymentAddress;
 import adlabs.nexus.client.util.Network;
 import com.bloxbean.cardano.client.api.common.OrderEnum;
 import com.bloxbean.cardano.client.api.exception.ApiException;
@@ -10,11 +11,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Nexus Asset Service. Only {@link #getAsset(String)} is backed by the SDK
- * (getAssetDetailedInformation); the other AssetService methods have no Nexus SDK equivalent yet.
+ * Nexus Asset Service. {@link #getAsset(String)} and the asset-addresses methods are backed by the
+ * SDK; policy-assets and asset transactions have no Nexus SDK equivalent yet.
  */
 public class NexusAssetService implements AssetService {
 
@@ -32,17 +34,21 @@ public class NexusAssetService implements AssetService {
 
     @Override
     public Result<Asset> getAsset(String unit) throws ApiException {
-        if (unit == null || unit.length() < POLICY_ID_HEX_LENGTH) {
-            throw new ApiException("Invalid asset unit: " + unit);
-        }
-        String policyId = unit.substring(0, POLICY_ID_HEX_LENGTH);
-        String assetName = unit.substring(POLICY_ID_HEX_LENGTH);
+        String[] parts = splitUnit(unit);
         try {
-            return NexusResultMapper.map(assetService.getAssetDetailedInformation(network, policyId, assetName),
+            return NexusResultMapper.map(assetService.getAssetDetailedInformation(network, parts[0], parts[1]),
                     info -> toAsset(unit, info));
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
             throw new ApiException(e.getMessage(), e);
         }
+    }
+
+    // unit is policy_id (56 hex chars) + hex-encoded asset_name; asset_name is empty when unit is policy-id-only.
+    private String[] splitUnit(String unit) throws ApiException {
+        if (unit == null || unit.length() < POLICY_ID_HEX_LENGTH) {
+            throw new ApiException("Invalid asset unit: " + unit);
+        }
+        return new String[]{unit.substring(0, POLICY_ID_HEX_LENGTH), unit.substring(POLICY_ID_HEX_LENGTH)};
     }
 
     private Asset toAsset(String unit, adlabs.nexus.client.backend.api.asset.model.AssetDetailedInformation info) {
@@ -75,17 +81,38 @@ public class NexusAssetService implements AssetService {
 
     @Override
     public Result<List<AssetAddress>> getAllAssetAddresses(String asset) throws ApiException {
-        throw new UnsupportedOperationException("getAllAssetAddresses not supported by Nexus");
-    }
-
-    @Override
-    public Result<List<AssetAddress>> getAssetAddresses(String asset, int count, int page, OrderEnum order) throws ApiException {
-        throw new UnsupportedOperationException("getAssetAddresses not supported by Nexus");
+        String[] parts = splitUnit(asset);
+        try {
+            return NexusResultMapper.map(assetService.getNftAddress(network, parts[0], parts[1]), this::toAssetAddresses);
+        } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
+            throw new ApiException(e.getMessage(), e);
+        }
     }
 
     @Override
     public Result<List<AssetAddress>> getAssetAddresses(String asset, int count, int page) throws ApiException {
-        throw new UnsupportedOperationException("getAssetAddresses not supported by Nexus");
+        return getAssetAddresses(asset, count, page, null);
+    }
+
+    // Nexus has no order param for asset addresses; order is ignored.
+    @Override
+    public Result<List<AssetAddress>> getAssetAddresses(String asset, int count, int page, OrderEnum order) throws ApiException {
+        String[] parts = splitUnit(asset);
+        try {
+            return NexusResultMapper.map(assetService.getNftAddress(network, parts[0], parts[1]),
+                    list -> NexusPagination.subList(toAssetAddresses(list), count, page));
+        } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
+            throw new ApiException(e.getMessage(), e);
+        }
+    }
+
+    private List<AssetAddress> toAssetAddresses(List<PaymentAddress> addresses) {
+        List<AssetAddress> result = new ArrayList<>();
+        for (PaymentAddress a : addresses) {
+            // SDK getNftAddress returns holder addresses only; no per-address quantity is available.
+            result.add(AssetAddress.builder().address(a.getPaymentAddress()).quantity(null).build());
+        }
+        return result;
     }
 
     @Override
