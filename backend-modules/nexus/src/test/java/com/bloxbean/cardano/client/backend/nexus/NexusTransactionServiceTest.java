@@ -1,14 +1,22 @@
 package com.bloxbean.cardano.client.backend.nexus;
 
 import adlabs.nexus.client.backend.api.transaction.model.Amount;
+import adlabs.nexus.client.backend.api.transaction.model.Datum;
+import adlabs.nexus.client.backend.api.transaction.model.ExecutionUnit;
+import adlabs.nexus.client.backend.api.transaction.model.PlutusScriptInput;
+import adlabs.nexus.client.backend.api.transaction.model.PlutusScriptRedeemer;
+import adlabs.nexus.client.backend.api.transaction.model.Purpose;
 import adlabs.nexus.client.backend.api.transaction.model.Transaction;
 import adlabs.nexus.client.backend.api.transaction.model.TransactionUtxos;
 import adlabs.nexus.client.backend.api.transaction.model.TxIO;
+import adlabs.nexus.client.backend.api.transaction.model.TxPlutusContract;
 import adlabs.nexus.client.backend.api.transaction.model.TxWithdrawal;
 import adlabs.nexus.client.backend.api.transaction.model.Utxo;
 import com.bloxbean.cardano.client.api.model.Result;
 import com.bloxbean.cardano.client.backend.model.TransactionContent;
+import com.bloxbean.cardano.client.backend.model.TxContentRedeemers;
 import com.bloxbean.cardano.client.backend.model.TxContentUtxo;
+import com.bloxbean.cardano.client.plutus.spec.RedeemerTag;
 import com.bloxbean.cardano.client.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
@@ -221,12 +229,110 @@ class NexusTransactionServiceTest {
     }
 
     @Test
-    void getTransactionRedeemers_unsupported() {
-        var svc = new NexusTransactionService(
-                mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class),
-                adlabs.nexus.client.util.Network.MAINNET);
+    void getTransactionRedeemers_maps() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class);
+        TxPlutusContract contract = TxPlutusContract.builder()
+                .scriptHash("s1")
+                .input(PlutusScriptInput.builder()
+                        .redeemer(PlutusScriptRedeemer.builder()
+                                .purpose(Purpose.SPEND)
+                                .fee("1000")
+                                .unit(ExecutionUnit.builder().mem(500).steps(1000000L).build())
+                                .datum(Datum.builder().hash("d1").build())
+                                .build())
+                        .build())
+                .build();
+        Transaction tx = Transaction.builder()
+                .txHash("txh1")
+                .plutusContracts(List.of(contract))
+                .build();
+        when(sdkSvc.getTransaction(eq(adlabs.nexus.client.util.Network.MAINNET), eq("txh1")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, tx));
+
+        var svc = new NexusTransactionService(sdkSvc, adlabs.nexus.client.util.Network.MAINNET);
+        Result<List<TxContentRedeemers>> r = svc.getTransactionRedeemers("txh1");
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).hasSize(1);
+        TxContentRedeemers redeemer = r.getValue().get(0);
+        assertThat(redeemer.getTxIndex()).isEqualTo(0);
+        assertThat(redeemer.getPurpose()).isEqualTo(RedeemerTag.Spend);
+        assertThat(redeemer.getScriptHash()).isEqualTo("s1");
+        assertThat(redeemer.getFee()).isEqualTo("1000");
+        assertThat(redeemer.getUnitMem()).isEqualTo("500");
+        assertThat(redeemer.getUnitSteps()).isEqualTo("1000000");
+        assertThat(redeemer.getDatumHash()).isEqualTo("d1");
+        assertThat(redeemer.getRedeemerDataHash()).isNull();
+    }
+
+    @Test
+    void getTransactionRedeemers_nullInput_doesNotNpe() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class);
+        TxPlutusContract contract = TxPlutusContract.builder()
+                .scriptHash("s2")
+                .input(null)
+                .build();
+        Transaction tx = Transaction.builder()
+                .txHash("txh1")
+                .plutusContracts(List.of(contract))
+                .build();
+        when(sdkSvc.getTransaction(eq(adlabs.nexus.client.util.Network.MAINNET), eq("txh1")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, tx));
+
+        var svc = new NexusTransactionService(sdkSvc, adlabs.nexus.client.util.Network.MAINNET);
+        Result<List<TxContentRedeemers>> r = svc.getTransactionRedeemers("txh1");
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).hasSize(1);
+        TxContentRedeemers redeemer = r.getValue().get(0);
+        assertThat(redeemer.getTxIndex()).isEqualTo(0);
+        assertThat(redeemer.getScriptHash()).isEqualTo("s2");
+        assertThat(redeemer.getPurpose()).isNull();
+        assertThat(redeemer.getFee()).isNull();
+        assertThat(redeemer.getUnitMem()).isNull();
+        assertThat(redeemer.getUnitSteps()).isNull();
+        assertThat(redeemer.getDatumHash()).isNull();
+        assertThat(redeemer.getRedeemerDataHash()).isNull();
+    }
+
+    @Test
+    void getTransactionRedeemers_emptyPlutusContracts_returnsEmptyList() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class);
+        Transaction tx = Transaction.builder().txHash("txh1").plutusContracts(List.of()).build();
+        when(sdkSvc.getTransaction(eq(adlabs.nexus.client.util.Network.MAINNET), eq("txh1")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, tx));
+
+        var svc = new NexusTransactionService(sdkSvc, adlabs.nexus.client.util.Network.MAINNET);
+        Result<List<TxContentRedeemers>> r = svc.getTransactionRedeemers("txh1");
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).isEmpty();
+    }
+
+    @Test
+    void getTransactionRedeemers_nullPlutusContracts_returnsEmptyList() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class);
+        Transaction tx = Transaction.builder().txHash("txh1").plutusContracts(null).build();
+        when(sdkSvc.getTransaction(eq(adlabs.nexus.client.util.Network.MAINNET), eq("txh1")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, tx));
+
+        var svc = new NexusTransactionService(sdkSvc, adlabs.nexus.client.util.Network.MAINNET);
+        Result<List<TxContentRedeemers>> r = svc.getTransactionRedeemers("txh1");
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).isEmpty();
+    }
+
+    @Test
+    void getTransactionRedeemers_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkSvc = mock(adlabs.nexus.client.backend.api.transaction.TransactionService.class);
+        when(sdkSvc.getTransaction(any(), any()))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
+        var svc = new NexusTransactionService(sdkSvc, adlabs.nexus.client.util.Network.MAINNET);
 
         assertThatThrownBy(() -> svc.getTransactionRedeemers("txh1"))
-                .isInstanceOf(UnsupportedOperationException.class);
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
     }
 }

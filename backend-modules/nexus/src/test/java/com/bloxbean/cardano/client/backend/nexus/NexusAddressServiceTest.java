@@ -3,6 +3,9 @@ package com.bloxbean.cardano.client.backend.nexus;
 import adlabs.nexus.client.backend.api.address.model.AddressInfo;
 import adlabs.nexus.client.backend.api.address.model.AddressTransaction;
 import adlabs.nexus.client.backend.api.address.model.AssetBalance;
+import adlabs.nexus.client.backend.api.address.model.Pagination;
+import adlabs.nexus.client.backend.api.address.model.TransactionHistoryItem;
+import adlabs.nexus.client.backend.api.address.model.TransactionHistoryResponse;
 import com.bloxbean.cardano.client.api.common.OrderEnum;
 import com.bloxbean.cardano.client.api.model.Result;
 import com.bloxbean.cardano.client.backend.model.AddressContent;
@@ -139,12 +142,100 @@ class NexusAddressServiceTest {
     }
 
     @Test
-    void getAllTransactions_unsupported() {
+    void getAllTransactions_pagesUntilHasNextFalse_accumulatesAndMaps() throws Exception {
         var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        TransactionHistoryItem i1 = TransactionHistoryItem.builder().txHash("tx1").txTimestamp(1000L).blockHeight(100L).build();
+        TransactionHistoryItem i2 = TransactionHistoryItem.builder().txHash("tx2").txTimestamp(1001L).blockHeight(101L).build();
+        TransactionHistoryItem i3 = TransactionHistoryItem.builder().txHash("tx3").txTimestamp(1002L).blockHeight(102L).build();
+        TransactionHistoryResponse page1 = TransactionHistoryResponse.builder()
+                .transactions(List.of(i1))
+                .pagination(Pagination.builder().hasNext(true).build())
+                .build();
+        TransactionHistoryResponse page2 = TransactionHistoryResponse.builder()
+                .transactions(List.of(i2, i3))
+                .pagination(Pagination.builder().hasNext(false).build())
+                .build();
+        when(sdkAddressSvc.getAddressTransactionHistory(eq(NET), eq("addr1"), eq(1), any(Integer.class)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, page1));
+        when(sdkAddressSvc.getAddressTransactionHistory(eq(NET), eq("addr1"), eq(2), any(Integer.class)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, page2));
+
+        var svc = new NexusAddressService(sdkAddressSvc, NET);
+        Result<List<AddressTransactionContent>> r = svc.getAllTransactions("addr1", OrderEnum.asc, null, null);
+
+        assertThat(r.isSuccessful()).isTrue();
+        List<AddressTransactionContent> txs = r.getValue();
+        assertThat(txs).extracting(AddressTransactionContent::getTxHash).containsExactly("tx1", "tx2", "tx3");
+        assertThat(txs.get(0).getTxIndex()).isEqualTo(0);
+        assertThat(txs.get(0).getBlockHeight()).isEqualTo(100L);
+        assertThat(txs.get(0).getBlockTime()).isEqualTo(1000L);
+        verify(sdkAddressSvc, times(1)).getAddressTransactionHistory(eq(NET), eq("addr1"), eq(1), any(Integer.class));
+        verify(sdkAddressSvc, times(1)).getAddressTransactionHistory(eq(NET), eq("addr1"), eq(2), any(Integer.class));
+        verify(sdkAddressSvc, times(0)).getAddressTransactionHistory(eq(NET), eq("addr1"), eq(3), any(Integer.class));
+    }
+
+    @Test
+    void getAllTransactions_filtersByBlockHeightRange() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        TransactionHistoryItem inRange = TransactionHistoryItem.builder().txHash("tx-in").txTimestamp(1000L).blockHeight(150L).build();
+        TransactionHistoryItem belowRange = TransactionHistoryItem.builder().txHash("tx-below").txTimestamp(999L).blockHeight(50L).build();
+        TransactionHistoryItem aboveRange = TransactionHistoryItem.builder().txHash("tx-above").txTimestamp(1002L).blockHeight(500L).build();
+        TransactionHistoryResponse page1 = TransactionHistoryResponse.builder()
+                .transactions(List.of(inRange, belowRange, aboveRange))
+                .pagination(Pagination.builder().hasNext(false).build())
+                .build();
+        when(sdkAddressSvc.getAddressTransactionHistory(eq(NET), eq("addr1"), eq(1), any(Integer.class)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, page1));
+
+        var svc = new NexusAddressService(sdkAddressSvc, NET);
+        Result<List<AddressTransactionContent>> r = svc.getAllTransactions("addr1", OrderEnum.asc, 100, 200);
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).extracting(AddressTransactionContent::getTxHash).containsExactly("tx-in");
+    }
+
+    @Test
+    void getAllTransactions_descOrder_reversesResult() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        TransactionHistoryItem i1 = TransactionHistoryItem.builder().txHash("tx1").txTimestamp(1000L).blockHeight(100L).build();
+        TransactionHistoryItem i2 = TransactionHistoryItem.builder().txHash("tx2").txTimestamp(1001L).blockHeight(101L).build();
+        TransactionHistoryResponse page1 = TransactionHistoryResponse.builder()
+                .transactions(List.of(i1, i2))
+                .pagination(Pagination.builder().hasNext(false).build())
+                .build();
+        when(sdkAddressSvc.getAddressTransactionHistory(eq(NET), eq("addr1"), eq(1), any(Integer.class)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, page1));
+
+        var svc = new NexusAddressService(sdkAddressSvc, NET);
+        Result<List<AddressTransactionContent>> r = svc.getAllTransactions("addr1", OrderEnum.desc, null, null);
+
+        assertThat(r.getValue()).extracting(AddressTransactionContent::getTxHash).containsExactly("tx2", "tx1");
+    }
+
+    @Test
+    void getAllTransactions_unsuccessfulPage_returnsErrorResult() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        when(sdkAddressSvc.getAddressTransactionHistory(eq(NET), eq("addr1"), eq(1), any(Integer.class)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.error(500, "boom"));
+
+        var svc = new NexusAddressService(sdkAddressSvc, NET);
+        Result<List<AddressTransactionContent>> r = svc.getAllTransactions("addr1", OrderEnum.asc, null, null);
+
+        assertThat(r.isSuccessful()).isFalse();
+        assertThat(r.code()).isEqualTo(500);
+    }
+
+    @Test
+    void getAllTransactions_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkAddressSvc = mock(adlabs.nexus.client.backend.api.address.AddressService.class);
+        when(sdkAddressSvc.getAddressTransactionHistory(any(), any(), any(Integer.class), any(Integer.class)))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("boom"));
+
         var svc = new NexusAddressService(sdkAddressSvc, NET);
 
-        assertThatThrownBy(() -> svc.getAllTransactions("addr1", OrderEnum.asc, 0, 100))
-                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> svc.getAllTransactions("addr1", OrderEnum.asc, null, null))
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("boom");
     }
 
     private static org.assertj.core.groups.Tuple tuple(Object... values) {

@@ -2,9 +2,14 @@ package com.bloxbean.cardano.client.backend.nexus;
 
 import adlabs.nexus.client.backend.api.asset.model.AssetDetailedInformation;
 import adlabs.nexus.client.backend.api.asset.model.AssetMetadata;
+import adlabs.nexus.client.backend.api.asset.model.PaymentAddress;
+import com.bloxbean.cardano.client.api.common.OrderEnum;
 import com.bloxbean.cardano.client.api.model.Result;
 import com.bloxbean.cardano.client.backend.model.Asset;
+import com.bloxbean.cardano.client.backend.model.AssetAddress;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -166,13 +171,86 @@ class NexusAssetServiceTest {
                 .hasMessageContaining("boom");
     }
 
+    // ---- getAllAssetAddresses / getAssetAddresses ----
+
+    private static List<PaymentAddress> threePaymentAddressRows() {
+        return List.of(
+                PaymentAddress.builder().paymentAddress("addr1aaa").stakeAddress("stake1aaa").build(),
+                PaymentAddress.builder().paymentAddress("addr1bbb").stakeAddress("stake1bbb").build(),
+                PaymentAddress.builder().paymentAddress("addr1ccc").stakeAddress("stake1ccc").build()
+        );
+    }
+
     @Test
-    void getAllAssetAddresses_unsupported() {
+    void getAllAssetAddresses_splitsUnitAndMapsFullList_quantityNull() throws Exception {
         var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        when(sdkAssetSvc.getNftAddress(eq(NET), eq(POLICY_ID), eq(ASSET_NAME)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, threePaymentAddressRows()));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        Result<List<AssetAddress>> r = svc.getAllAssetAddresses(UNIT);
+
+        verify(sdkAssetSvc, times(1)).getNftAddress(NET, POLICY_ID, ASSET_NAME);
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).extracting(AssetAddress::getAddress)
+                .containsExactly("addr1aaa", "addr1bbb", "addr1ccc");
+        assertThat(r.getValue()).allSatisfy(a -> assertThat(a.getQuantity()).isNull());
+    }
+
+    @Test
+    void getAssetAddresses_paginatesPage1AndPage2() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        when(sdkAssetSvc.getNftAddress(eq(NET), eq(POLICY_ID), eq(ASSET_NAME)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, threePaymentAddressRows()));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        Result<List<AssetAddress>> page1 = svc.getAssetAddresses(UNIT, 2, 1);
+        Result<List<AssetAddress>> page2 = svc.getAssetAddresses(UNIT, 2, 2);
+
+        assertThat(page1.getValue()).extracting(AssetAddress::getAddress)
+                .containsExactly("addr1aaa", "addr1bbb");
+        assertThat(page2.getValue()).extracting(AssetAddress::getAddress)
+                .containsExactly("addr1ccc");
+    }
+
+    @Test
+    void getAssetAddresses_withOrder_delegatesSamePagination() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        when(sdkAssetSvc.getNftAddress(eq(NET), eq(POLICY_ID), eq(ASSET_NAME)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, threePaymentAddressRows()));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        Result<List<AssetAddress>> r = svc.getAssetAddresses(UNIT, 2, 1, OrderEnum.desc);
+
+        assertThat(r.getValue()).extracting(AssetAddress::getAddress)
+                .containsExactly("addr1aaa", "addr1bbb");
+    }
+
+    @Test
+    void getAllAssetAddresses_policyIdOnlyUnit_splitsWithEmptyAssetName() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        when(sdkAssetSvc.getNftAddress(eq(NET), eq(POLICY_ID), eq("")))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, threePaymentAddressRows()));
+
+        var svc = new NexusAssetService(sdkAssetSvc, NET);
+        Result<List<AssetAddress>> r = svc.getAllAssetAddresses(POLICY_ID);
+
+        verify(sdkAssetSvc, times(1)).getNftAddress(NET, POLICY_ID, "");
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).hasSize(3);
+    }
+
+    @Test
+    void getAllAssetAddresses_sdkApiException_rethrownAsBloxbean() throws Exception {
+        var sdkAssetSvc = mock(adlabs.nexus.client.backend.api.asset.AssetService.class);
+        when(sdkAssetSvc.getNftAddress(any(), any(), any()))
+                .thenThrow(new adlabs.nexus.client.backend.api.base.exception.ApiException("addresses boom"));
+
         var svc = new NexusAssetService(sdkAssetSvc, NET);
 
         assertThatThrownBy(() -> svc.getAllAssetAddresses(UNIT))
-                .isInstanceOf(UnsupportedOperationException.class);
+                .isInstanceOf(com.bloxbean.cardano.client.api.exception.ApiException.class)
+                .hasMessageContaining("addresses boom");
     }
 
     @Test
