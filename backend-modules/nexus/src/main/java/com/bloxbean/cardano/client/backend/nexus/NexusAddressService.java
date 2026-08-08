@@ -3,6 +3,9 @@ package com.bloxbean.cardano.client.backend.nexus;
 import adlabs.nexus.client.backend.api.address.model.AddressInfo;
 import adlabs.nexus.client.backend.api.address.model.AddressTransaction;
 import adlabs.nexus.client.backend.api.address.model.AssetBalance;
+import adlabs.nexus.client.backend.api.address.model.Pagination;
+import adlabs.nexus.client.backend.api.address.model.TransactionHistoryItem;
+import adlabs.nexus.client.backend.api.address.model.TransactionHistoryResponse;
 import adlabs.nexus.client.util.Network;
 import com.bloxbean.cardano.client.api.common.OrderEnum;
 import com.bloxbean.cardano.client.api.exception.ApiException;
@@ -13,6 +16,7 @@ import com.bloxbean.cardano.client.backend.model.AddressTransactionContent;
 import com.bloxbean.cardano.client.backend.model.TxContentOutputAmount;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static com.bloxbean.cardano.client.common.CardanoConstants.LOVELACE;
@@ -21,6 +25,9 @@ import static com.bloxbean.cardano.client.common.CardanoConstants.LOVELACE;
  * Nexus Address Service
  */
 public class NexusAddressService implements com.bloxbean.cardano.client.backend.api.AddressService {
+
+    private static final int ALL_TRANSACTIONS_PAGE_SIZE = 100;
+    private static final int ALL_TRANSACTIONS_MAX_PAGES = 1000;
 
     private final adlabs.nexus.client.backend.api.address.AddressService addressService;
     private final Network network;
@@ -60,9 +67,60 @@ public class NexusAddressService implements com.bloxbean.cardano.client.backend.
         return getTransactions(address, count, page);
     }
 
+    // Nexus history is paginated server-side; loop until hasNext is false, capped to avoid an infinite loop on a misbehaving flag.
     @Override
     public Result<List<AddressTransactionContent>> getAllTransactions(String address, OrderEnum order, Integer fromBlockHeight, Integer toBlockHeight) throws ApiException {
-        throw new UnsupportedOperationException("getAllTransactions not supported by Nexus");
+        List<AddressTransactionContent> all = new ArrayList<>();
+        try {
+            int page = 1;
+            while (page <= ALL_TRANSACTIONS_MAX_PAGES) {
+                adlabs.nexus.client.backend.api.base.Result<TransactionHistoryResponse> pageResult =
+                        addressService.getAddressTransactionHistory(network, address, page, ALL_TRANSACTIONS_PAGE_SIZE);
+                if (!pageResult.isSuccessful()) {
+                    return Result.error(pageResult.getResponse()).code(pageResult.getCode());
+                }
+                TransactionHistoryResponse body = pageResult.getValue();
+                if (body != null && body.getTransactions() != null) {
+                    all.addAll(toAddressTransactionContentsFromHistory(body.getTransactions()));
+                }
+                Pagination pagination = body == null ? null : body.getPagination();
+                if (pagination == null || !Boolean.TRUE.equals(pagination.getHasNext())) {
+                    break;
+                }
+                page++;
+            }
+        } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
+            throw new ApiException(e.getMessage(), e);
+        }
+
+        List<AddressTransactionContent> filtered = filterByBlockHeight(all, fromBlockHeight, toBlockHeight);
+        if (order == OrderEnum.desc) {
+            Collections.reverse(filtered);
+        }
+        return Result.success("OK").withValue(filtered).code(200);
+    }
+
+    private List<AddressTransactionContent> filterByBlockHeight(List<AddressTransactionContent> txs, Integer fromBlockHeight, Integer toBlockHeight) {
+        List<AddressTransactionContent> result = new ArrayList<>();
+        for (AddressTransactionContent tx : txs) {
+            if (fromBlockHeight != null && tx.getBlockHeight() < fromBlockHeight) continue;
+            if (toBlockHeight != null && tx.getBlockHeight() > toBlockHeight) continue;
+            result.add(tx);
+        }
+        return result;
+    }
+
+    private List<AddressTransactionContent> toAddressTransactionContentsFromHistory(List<TransactionHistoryItem> items) {
+        List<AddressTransactionContent> result = new ArrayList<>();
+        for (TransactionHistoryItem item : items) {
+            result.add(AddressTransactionContent.builder()
+                    .txHash(item.getTxHash())
+                    .txIndex(0)
+                    .blockHeight(item.getBlockHeight() == null ? 0L : item.getBlockHeight())
+                    .blockTime(item.getTxTimestamp() == null ? 0L : item.getTxTimestamp())
+                    .build());
+        }
+        return result;
     }
 
     private AddressContent toAddressContent(AddressInfo addressInfo) {
