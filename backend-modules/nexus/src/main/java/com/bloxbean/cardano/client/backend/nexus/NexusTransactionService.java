@@ -10,11 +10,14 @@ import com.bloxbean.cardano.client.backend.model.TxContentRedeemers;
 import com.bloxbean.cardano.client.backend.model.TxContentUtxo;
 import com.bloxbean.cardano.client.backend.model.TxContentUtxoInputs;
 import com.bloxbean.cardano.client.backend.model.TxContentUtxoOutputs;
+import com.bloxbean.cardano.client.plutus.spec.RedeemerTag;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Nexus Transaction Service
@@ -72,7 +75,37 @@ public class NexusTransactionService implements TransactionService {
 
     @Override
     public Result<List<TxContentRedeemers>> getTransactionRedeemers(String txnHash) throws ApiException {
-        throw new UnsupportedOperationException("getTransactionRedeemers not supported by Nexus");
+        try {
+            return NexusResultMapper.map(transactionService.getTransaction(network, txnHash),
+                    tx -> toRedeemers(tx.getPlutusContracts()));
+        } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
+            throw new ApiException(e.getMessage(), e);
+        }
+    }
+
+    private List<TxContentRedeemers> toRedeemers(List<adlabs.nexus.client.backend.api.transaction.model.TxPlutusContract> contracts) {
+        if (contracts == null || contracts.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return IntStream.range(0, contracts.size())
+                .mapToObj(i -> toTxContentRedeemer(i, contracts.get(i)))
+                .collect(Collectors.toList());
+    }
+
+    private TxContentRedeemers toTxContentRedeemer(int index, adlabs.nexus.client.backend.api.transaction.model.TxPlutusContract c) {
+        // No SDK source for redeemerDataHash; leave unmapped.
+        adlabs.nexus.client.backend.api.transaction.model.PlutusScriptRedeemer r =
+                c.getInput() == null ? null : c.getInput().getRedeemer();
+        return TxContentRedeemers.builder()
+                .txIndex(index)
+                .scriptHash(c.getScriptHash())
+                .purpose(r == null || r.getPurpose() == null ? null : RedeemerTag.convert(r.getPurpose().name()))
+                .fee(r == null ? null : r.getFee())
+                .unitMem(r == null || r.getUnit() == null || r.getUnit().getMem() == null ? null : r.getUnit().getMem().toString())
+                .unitSteps(r == null || r.getUnit() == null || r.getUnit().getSteps() == null ? null : r.getUnit().getSteps().toString())
+                .datumHash(r == null || r.getDatum() == null ? null : r.getDatum().getHash())
+                .redeemerDataHash(null)
+                .build();
     }
 
     private TransactionContent toTransactionContent(adlabs.nexus.client.backend.api.transaction.model.Transaction tx) {
