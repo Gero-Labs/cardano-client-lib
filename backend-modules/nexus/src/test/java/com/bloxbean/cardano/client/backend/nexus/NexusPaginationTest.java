@@ -11,4 +11,9 @@ class NexusPaginationTest {
     @Test void pageBeyondRange_empty() { assertThat(NexusPagination.subList(ten,3,5)).isEmpty(); }
     @Test void pageLessThan1_empty() { assertThat(NexusPagination.subList(ten,3,0)).isEmpty(); }
     @Test void nullInput_empty() { assertThat(NexusPagination.subList(null,3,1)).isEmpty(); }
+    @Test void countLessThan1_empty() {
+        assertThat(NexusPagination.subList(ten,0,1)).isEmpty();
+        assertThat(NexusPagination.subList(ten,-1,1)).isEmpty();
+    }
+    @Test void emptyInput_empty() { assertThat(NexusPagination.subList(List.of(),3,1)).isEmpty(); }
 }

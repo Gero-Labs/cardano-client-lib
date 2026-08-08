@@ -14,6 +14,8 @@ import com.bloxbean.cardano.client.backend.model.AddressContent;
 import com.bloxbean.cardano.client.backend.model.AddressDetails;
 import com.bloxbean.cardano.client.backend.model.AddressTransactionContent;
 import com.bloxbean.cardano.client.backend.model.TxContentOutputAmount;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,6 +28,10 @@ import static com.bloxbean.cardano.client.common.CardanoConstants.LOVELACE;
  */
 public class NexusAddressService implements com.bloxbean.cardano.client.backend.api.AddressService {
 
+    private static final Logger log = LoggerFactory.getLogger(NexusAddressService.class);
+
+    // Client-side defaults (not SDK-mandated): page size for the history fetch,
+    // and a hard safety cap bounding the page-loop below.
     private static final int ALL_TRANSACTIONS_PAGE_SIZE = 100;
     private static final int ALL_TRANSACTIONS_MAX_PAGES = 1000;
 
@@ -71,6 +77,7 @@ public class NexusAddressService implements com.bloxbean.cardano.client.backend.
     @Override
     public Result<List<AddressTransactionContent>> getAllTransactions(String address, OrderEnum order, Integer fromBlockHeight, Integer toBlockHeight) throws ApiException {
         List<AddressTransactionContent> all = new ArrayList<>();
+        boolean truncatedByCap = false;
         try {
             int page = 1;
             while (page <= ALL_TRANSACTIONS_MAX_PAGES) {
@@ -84,13 +91,22 @@ public class NexusAddressService implements com.bloxbean.cardano.client.backend.
                     all.addAll(toAddressTransactionContentsFromHistory(body.getTransactions()));
                 }
                 Pagination pagination = body == null ? null : body.getPagination();
-                if (pagination == null || !Boolean.TRUE.equals(pagination.getHasNext())) {
+                boolean hasNext = pagination != null && Boolean.TRUE.equals(pagination.getHasNext());
+                if (!hasNext) {
                     break;
+                }
+                if (page == ALL_TRANSACTIONS_MAX_PAGES) {
+                    truncatedByCap = true;
                 }
                 page++;
             }
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
             throw new ApiException(e.getMessage(), e);
+        }
+
+        if (truncatedByCap) {
+            log.warn("getAllTransactions truncated at {} pages ({} txs) for address {}; more pages were available",
+                    ALL_TRANSACTIONS_MAX_PAGES, ALL_TRANSACTIONS_MAX_PAGES * ALL_TRANSACTIONS_PAGE_SIZE, address);
         }
 
         List<AddressTransactionContent> filtered = filterByBlockHeight(all, fromBlockHeight, toBlockHeight);
