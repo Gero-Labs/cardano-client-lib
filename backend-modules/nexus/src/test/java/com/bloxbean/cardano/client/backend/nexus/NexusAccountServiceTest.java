@@ -257,9 +257,9 @@ class NexusAccountServiceTest {
     }
 
     @Test
-    void getAccountTransactions_nullFromBlockHeight_defaultsToZero() throws Exception {
+    void getAccountTransactions_nullFromBlockHeight_defaultsToOne() throws Exception {
         var sdkAccountSvc = mock(adlabs.nexus.client.backend.api.account.AccountService.class);
-        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(0)))
+        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(1)))
                 .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, fourTxRows()));
 
         var svc = new NexusAccountService(sdkAccountSvc, NET);
@@ -271,9 +271,23 @@ class NexusAccountServiceTest {
     }
 
     @Test
+    void getAccountTransactions_explicitFromBlockHeight_usedAsIs() throws Exception {
+        var sdkAccountSvc = mock(adlabs.nexus.client.backend.api.account.AccountService.class);
+        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(150)))
+                .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, fourTxRows()));
+
+        var svc = new NexusAccountService(sdkAccountSvc, NET);
+        Result<List<com.bloxbean.cardano.client.backend.model.AddressTransactionContent>> r =
+                svc.getAccountTransactions("stake1xyz", 10, 1, null, 150, null);
+
+        assertThat(r.isSuccessful()).isTrue();
+        assertThat(r.getValue()).hasSize(4);
+    }
+
+    @Test
     void getAccountTransactions_toBlockHeightFiltersClientSide() throws Exception {
         var sdkAccountSvc = mock(adlabs.nexus.client.backend.api.account.AccountService.class);
-        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(0)))
+        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(1)))
                 .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, fourTxRows()));
 
         var svc = new NexusAccountService(sdkAccountSvc, NET);
@@ -287,7 +301,7 @@ class NexusAccountServiceTest {
     @Test
     void getAccountTransactions_descOrderReversesBeforePagination() throws Exception {
         var sdkAccountSvc = mock(adlabs.nexus.client.backend.api.account.AccountService.class);
-        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(0)))
+        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(1)))
                 .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, fourTxRows()));
 
         var svc = new NexusAccountService(sdkAccountSvc, NET);
@@ -314,7 +328,7 @@ class NexusAccountServiceTest {
     @Test
     void getAllAccountTransactions_fullList_toBlockHeightFilter_andDescReverse() throws Exception {
         var sdkAccountSvc = mock(adlabs.nexus.client.backend.api.account.AccountService.class);
-        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(0)))
+        when(sdkAccountSvc.getAccountTransactions(eq(NET), eq("stake1xyz"), eq(1)))
                 .thenReturn(adlabs.nexus.client.backend.api.base.Result.success(200, fourTxRows()));
 
         var svc = new NexusAccountService(sdkAccountSvc, NET);

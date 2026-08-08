@@ -117,7 +117,8 @@ public class NexusAccountService implements AccountService {
     @Override
     public Result<List<AddressTransactionContent>> getAccountTransactions(String stakeAddress, int count, int page, OrderEnum order, Integer fromBlockHeight, Integer toBlockHeight) throws ApiException {
         try {
-            int fromBH = fromBlockHeight == null ? 0 : fromBlockHeight;
+            // Nexus requires fromBlockHeight; SDK javadoc says pass 1 for full history.
+            int fromBH = fromBlockHeight == null ? 1 : fromBlockHeight;
             return NexusResultMapper.map(accountService.getAccountTransactions(network, stakeAddress, fromBH),
                     list -> NexusPagination.subList(toAddressTransactionContents(list, toBlockHeight, order), count, page));
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
@@ -128,7 +129,8 @@ public class NexusAccountService implements AccountService {
     @Override
     public Result<List<AddressTransactionContent>> getAllAccountTransactions(String stakeAddress, OrderEnum order, Integer fromBlockHeight, Integer toBlockHeight) throws ApiException {
         try {
-            int fromBH = fromBlockHeight == null ? 0 : fromBlockHeight;
+            // Nexus requires fromBlockHeight; SDK javadoc says pass 1 for full history.
+            int fromBH = fromBlockHeight == null ? 1 : fromBlockHeight;
             return NexusResultMapper.map(accountService.getAccountTransactions(network, stakeAddress, fromBH),
                     list -> toAddressTransactionContents(list, toBlockHeight, order));
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
