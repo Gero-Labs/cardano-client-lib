@@ -1,0 +1,21 @@
+// Nexus SDK isn't published to Maven Central yet; scoped here so mavenLocal() doesn't weaken every module's build reproducibility.
+repositories {
+    mavenLocal()
+}
+
+dependencies {
+    api project(':core')
+    api project(':backend')
+    api libs.nexus.java
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Cardano Client Nexus Backend'
+                description = 'Cardano Client Lib - Nexus Backend Module'
+            }
+        }
+    }
+}
