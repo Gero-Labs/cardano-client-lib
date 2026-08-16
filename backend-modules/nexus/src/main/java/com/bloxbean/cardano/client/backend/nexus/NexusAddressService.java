@@ -59,112 +59,58 @@ public class NexusAddressService implements com.bloxbean.cardano.client.backend.
 
     @Override
     public Result<List<AddressTransactionContent>> getTransactions(String address, int count, int page) throws ApiException {
+        // Blockfrost defaults to ascending (oldest first).
+        return getTransactions(address, count, page, OrderEnum.asc);
+    }
+
+    @Override
+    public Result<List<AddressTransactionContent>> getTransactions(String address, int count, int page, OrderEnum order) throws ApiException {
+        return getTransactions(address, count, page, order, null, null);
+    }
+
+    @Override
+    public Result<List<AddressTransactionContent>> getTransactions(String address, int count, int page, OrderEnum order, String fromBlockHeight, String toBlockHeight) throws ApiException {
+        Integer from = (fromBlockHeight == null || fromBlockHeight.isEmpty()) ? null : Integer.valueOf(fromBlockHeight);
+        Integer to = (toBlockHeight == null || toBlockHeight.isEmpty()) ? null : Integer.valueOf(toBlockHeight);
         try {
-            return NexusResultMapper.map(addressService.getAddressTransactions(network, address, page, count),
+            return NexusResultMapper.map(
+                    addressService.getAddressTransactions(network, address, page, count, from, to, orderStr(order)),
                     this::toAddressTransactionContents);
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
             throw new ApiException(e.getMessage(), e);
         }
     }
 
-    // Nexus has no order param; delegate as-is.
-    @Override
-    public Result<List<AddressTransactionContent>> getTransactions(String address, int count, int page, OrderEnum order) throws ApiException {
-        return getTransactions(address, count, page);
+    private static String orderStr(OrderEnum order) {
+        return order == OrderEnum.desc ? "desc" : "asc";
     }
 
-    // Nexus has no block-range filter on the paged endpoint; fetch the full history (already
-    // block-filtered + ordered by getAllTransactions), then page client-side to match Blockfrost.
-    @Override
-    public Result<List<AddressTransactionContent>> getTransactions(String address, int count, int page, OrderEnum order, String fromBlockHeight, String toBlockHeight) throws ApiException {
-        Integer from = (fromBlockHeight == null || fromBlockHeight.isEmpty()) ? null : Integer.valueOf(fromBlockHeight);
-        Integer to = (toBlockHeight == null || toBlockHeight.isEmpty()) ? null : Integer.valueOf(toBlockHeight);
-        Result<List<AddressTransactionContent>> all = getAllTransactions(address, order, from, to);
-        if (!all.isSuccessful()) {
-            return all;
-        }
-        List<AddressTransactionContent> list = all.getValue();
-        int fromIdx = Math.max(0, (page - 1) * count);
-        if (fromIdx >= list.size()) {
-            return Result.success("OK").withValue(new ArrayList<>()).code(200);
-        }
-        int toIdx = Math.min(list.size(), fromIdx + count);
-        return Result.success("OK").withValue(new ArrayList<>(list.subList(fromIdx, toIdx))).code(200);
-    }
-
-    // Nexus history is paginated server-side; loop until hasNext is false, capped to avoid an infinite loop on a misbehaving flag.
+    // Server-side block-range + order (Nexus 1.3+): page the range endpoint until a short page.
     @Override
     public Result<List<AddressTransactionContent>> getAllTransactions(String address, OrderEnum order, Integer fromBlockHeight, Integer toBlockHeight) throws ApiException {
-        Result<List<AddressTransactionContent>> fetched;
+        List<AddressTransactionContent> all = new ArrayList<>();
         try {
-            fetched = fetchAllHistoryPages(address);
+            int page = 1;
+            while (page <= ALL_TRANSACTIONS_MAX_PAGES) {
+                adlabs.nexus.client.backend.api.base.Result<List<AddressTransaction>> pageResult =
+                        addressService.getAddressTransactions(network, address, page, ALL_TRANSACTIONS_PAGE_SIZE, fromBlockHeight, toBlockHeight, orderStr(order));
+                if (!pageResult.isSuccessful()) {
+                    return Result.error(pageResult.getResponse()).code(pageResult.getCode());
+                }
+                List<AddressTransaction> body = pageResult.getValue();
+                if (body == null || body.isEmpty()) {
+                    break;
+                }
+                all.addAll(toAddressTransactionContents(body));
+                if (body.size() < ALL_TRANSACTIONS_PAGE_SIZE) {
+                    break;
+                }
+                page++;
+            }
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
             throw new ApiException(e.getMessage(), e);
         }
-        if (!fetched.isSuccessful()) {
-            return fetched;
-        }
-
-        List<AddressTransactionContent> filtered = filterByBlockHeight(fetched.getValue(), fromBlockHeight, toBlockHeight);
-        if (order == OrderEnum.desc) {
-            Collections.reverse(filtered);
-        }
-        return Result.success("OK").withValue(filtered).code(200);
-    }
-
-    // Walks the server-side history pages into a single list; an unsuccessful page short-circuits to an error Result.
-    private Result<List<AddressTransactionContent>> fetchAllHistoryPages(String address) throws adlabs.nexus.client.backend.api.base.exception.ApiException {
-        List<AddressTransactionContent> all = new ArrayList<>();
-        boolean truncatedByCap = false;
-        int page = 1;
-        while (page <= ALL_TRANSACTIONS_MAX_PAGES) {
-            adlabs.nexus.client.backend.api.base.Result<TransactionHistoryResponse> pageResult =
-                    addressService.getAddressTransactionHistory(network, address, page, ALL_TRANSACTIONS_PAGE_SIZE);
-            if (!pageResult.isSuccessful()) {
-                return Result.error(pageResult.getResponse()).code(pageResult.getCode());
-            }
-            TransactionHistoryResponse body = pageResult.getValue();
-            if (body != null && body.getTransactions() != null) {
-                all.addAll(toAddressTransactionContentsFromHistory(body.getTransactions()));
-            }
-            Pagination pagination = body == null ? null : body.getPagination();
-            if (pagination == null || !Boolean.TRUE.equals(pagination.getHasNext())) {
-                break;
-            }
-            truncatedByCap = (page == ALL_TRANSACTIONS_MAX_PAGES);
-            page++;
-        }
-
-        if (truncatedByCap) {
-            log.warn("getAllTransactions truncated at {} pages ({} txs) for address {}; more pages were available",
-                    ALL_TRANSACTIONS_MAX_PAGES, ALL_TRANSACTIONS_MAX_PAGES * ALL_TRANSACTIONS_PAGE_SIZE, address);
-        }
         return Result.success("OK").withValue(all).code(200);
-    }
-
-    private List<AddressTransactionContent> filterByBlockHeight(List<AddressTransactionContent> txs, Integer fromBlockHeight, Integer toBlockHeight) {
-        List<AddressTransactionContent> result = new ArrayList<>();
-        for (AddressTransactionContent tx : txs) {
-            boolean belowFrom = fromBlockHeight != null && tx.getBlockHeight() < fromBlockHeight;
-            boolean aboveTo = toBlockHeight != null && tx.getBlockHeight() > toBlockHeight;
-            if (!belowFrom && !aboveTo) {
-                result.add(tx);
-            }
-        }
-        return result;
-    }
-
-    private List<AddressTransactionContent> toAddressTransactionContentsFromHistory(List<TransactionHistoryItem> items) {
-        List<AddressTransactionContent> result = new ArrayList<>();
-        for (TransactionHistoryItem item : items) {
-            result.add(AddressTransactionContent.builder()
-                    .txHash(item.getTxHash())
-                    .txIndex(0)
-                    .blockHeight(item.getBlockHeight() == null ? 0L : item.getBlockHeight())
-                    .blockTime(item.getTxTimestamp() == null ? 0L : item.getTxTimestamp())
-                    .build());
-        }
-        return result;
     }
 
     private AddressContent toAddressContent(AddressInfo addressInfo) {

@@ -131,8 +131,11 @@ public class NexusAccountService implements AccountService {
         try {
             // Nexus requires fromBlockHeight; SDK javadoc says pass 1 for full history.
             int fromBH = fromBlockHeight == null ? 1 : fromBlockHeight;
-            return NexusResultMapper.map(accountService.getAccountTransactions(network, stakeAddress, fromBH),
-                    list -> toAddressTransactionContents(list, toBlockHeight, order));
+            String orderStr = order == OrderEnum.desc ? "desc" : "asc";
+            // Server (Nexus 1.3+) filters [from,to] + orders; pass null/asc to the mapper so it doesn't re-filter/re-order.
+            return NexusResultMapper.map(
+                    accountService.getAccountTransactions(network, stakeAddress, fromBH, toBlockHeight, orderStr),
+                    list -> toAddressTransactionContents(list, null, OrderEnum.asc));
         } catch (adlabs.nexus.client.backend.api.base.exception.ApiException e) {
             throw new ApiException(e.getMessage(), e);
         }
